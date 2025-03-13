@@ -1,1 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ドントストップしょーん</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: sans-serif;
+            background-color: #f0f0f0;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .button {
+            position: absolute;
+            padding: 10px 20px;
+            font-size: 20px;
+            color: white;
+            background-color: #4CAF50;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 10;
+        }
+        #pause-button, #resume-button, #reset-button {
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        #pause-button {
+            left: calc(50% - 70px); /* ポーズボタンを左に調整 */
+        }
+        #resume-button {
+            left: calc(50% - 70px); /* 再開ボタンをポーズと同じ位置に */
+        }
+        #reset-button {
+            left: calc(50% + 70px); /* 最初からボタンをポーズの右に配置 */
+            background-color: #FF5722; /* 色を変えて視認性アップ */
+        }
+        #up-button, #down-button {
+            position: absolute;
+            right: 10px;
+            width: 50px;
+            height: 50px;
+            font-size: 30px;
+            background-color: #2196F3;
+        }
+        #up-button {
+            bottom: 80px;
+        }
+        #down-button {
+            bottom: 20px;
+        }
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 30px;
+            color: red;
+            z-index: 10;
+        }
+        #start-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 20;
+            opacity: 1;
+            transition: opacity 1s ease-out;
+        }
+        #start-message.hidden {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <button id="pause-button" class="button" style="display: none;">ポーズ</button>
+        <button id="resume-button" class="button" style="display: none;">再開</button>
+        <button id="reset-button" class="button" style="display: none;">最初から</button>
+        <button id="up-button" class="button" style="display: none;">↑</button>
+        <button id="down-button" class="button" style="display: none;">↓</button>
+        <div id="message" style="display: none;"></div>
+        <div id="start-message">走れ！</div>
+    </div>
+    <script>
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const pauseButton = document.getElementById('pause-button');
+        const resumeButton = document.getElementById('resume-button');
+        const resetButton = document.getElementById('reset-button');
+        const upButton = document.getElementById('up-button');
+        const downButton = document.getElementById('down-button');
+        const message = document.getElementById('message');
+        const startMessage = document.getElementById('start-message');
 
+        let gameState = 'playing'; // 初期状態をplayingに
+        let characterImg = new Image();
+        characterImg.src = 'https://pbs.twimg.com/profile_images/1890585622500503552/rOXm_mUw_400x400.jpg';
+
+        let character = { x: canvas.width - 100, y: 50, width: 50, height: 50, speed: 5 }; // 右側に配置
+        let obstacles = [];
+        let goal = { x: 0, y: 0, width: 100, height: 1000, visible: false, animationOffset: 0 };
+        let timer = 0; // 秒数管理用
+        let scrollOffset = 0;
+        let animationFrameId;
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            character.x = canvas.width - 100; // 右側に固定
+            character.y = canvas.height / 2 - character.height / 2;
+            goal.y = 0;
+            goal.height = canvas.height;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function drawBackground() {
+            ctx.fillStyle = '#7CFC00'; // 緑の草原
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function drawCharacter() {
+            ctx.drawImage(characterImg, character.x, character.y, character.width, character.height);
+        }
+
+        function drawObstacles() {
+            obstacles.forEach(obstacle => {
+                ctx.font = '40px sans-serif';
+                ctx.fillText('🔥', obstacle.x - scrollOffset, obstacle.y + 40);
+            });
+        }
+
+        function drawGoal() {
+            if (goal.visible) {
+                const waveAmplitude = 10;
+                const waveFrequency = 0.1;
+                goal.animationOffset += 0.05;
+                const stripeHeight = 50; // 縞模様の高さ
+
+                for (let y = 0; y < goal.height; y += stripeHeight) {
+                    ctx.fillStyle = (Math.floor(y / stripeHeight) % 2 === 0) ? '#FFFFFF' : '#000000';
+                    ctx.beginPath();
+                    ctx.moveTo(goal.x, goal.y + y); // scrollOffsetを削除し、純粋なx座標を使用
+                    for (let offsetY = 0; offsetY <= stripeHeight && y + offsetY <= goal.height; offsetY += 10) {
+                        const waveOffset = Math.sin((y + offsetY) * waveFrequency + goal.animationOffset) * waveAmplitude;
+                        ctx.lineTo(goal.x + waveOffset, goal.y + y + offsetY);
+                    }
+                    ctx.lineTo(goal.x, goal.y + y + stripeHeight);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+            }
+        }
+
+        function update() {
+            if (gameState === 'playing') {
+                scrollOffset += 2;
+                if (scrollOffset >= 2000) scrollOffset = 0;
+
+                if (Math.random() < 0.02) {
+                    let obstacle = {
+                        x: -scrollOffset, // 左から出現
+                        y: Math.random() * (canvas.height - 50),
+                        width: 40,
+                        height: 40
+                    };
+                    obstacles.push(obstacle);
+                }
+
+                obstacles.forEach(obstacle => {
+                    obstacle.x += 4; // 左から右に流れる
+                });
+
+                obstacles = obstacles.filter(obstacle => obstacle.x - scrollOffset < canvas.width + 50);
+
+                obstacles.forEach(obstacle => {
+                    if (
+                        character.x < obstacle.x - scrollOffset + obstacle.width &&
+                        character.x + character.width > obstacle.x - scrollOffset &&
+                        character.y < obstacle.y + obstacle.height &&
+                        character.y + character.height > obstacle.y
+                    ) {
+                        gameState = 'gameover';
+                        message.textContent = 'ｼﾞﾝｷﾞｽｶﾝ🥺';
+                        message.style.display = 'block';
+                    }
+                });
+
+                timer += 1 / 60; // タイマーをカウントアップ
+                if (timer >= 25 && !goal.visible) {
+                    goal.visible = true; // 25秒経過でゴールテープを表示
+                    goal.x = 0; // 画面左端からスタート
+                    console.log('Goal tape visible at timer:', timer, 'goal.x:', goal.x); // デバッグ用
+                }
+
+                if (goal.visible) {
+                    goal.x += 4; // ゴールテープを左から右に流す
+                }
+
+                // ゴールテープに到達したらクリア
+                if (goal.visible && character.x < goal.x) {
+                    gameState = 'gameclear';
+                    message.textContent = 'おめでとう！しょーんもな𖤐';
+                    message.style.display = 'block';
+                }
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBackground();
+            drawCharacter();
+            drawObstacles();
+            drawGoal();
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            gameState = 'playing';
+            pauseButton.style.display = 'block';
+            resetButton.style.display = 'block';
+            upButton.style.display = 'block';
+            downButton.style.display = 'block';
+            message.style.display = 'none';
+            obstacles = [];
+            scrollOffset = 0;
+            timer = 0;
+            goal.visible = false;
+            goal.x = 0;
+            goal.animationOffset = 0;
+            character.x = canvas.width - 100;
+            character.y = canvas.height / 2 - character.height / 2;
+
+            // ゲームスタートメッセージを表示
+            startMessage.style.display = 'block';
+            setTimeout(() => {
+                startMessage.classList.add('hidden');
+                setTimeout(() => {
+                    startMessage.style.display = 'none';
+                }, 1000); // フェードアウト後に非表示
+            }, 2000); // 2秒表示
+
+            gameLoop();
+        }
+
+        function pauseGame() {
+            gameState = 'paused';
+            cancelAnimationFrame(animationFrameId);
+            pauseButton.style.display = 'none';
+            resumeButton.style.display = 'block';
+            upButton.style.display = 'none';
+            downButton.style.display = 'none';
+        }
+
+        function resumeGame() {
+            gameState = 'playing';
+            resumeButton.style.display = 'none';
+            pauseButton.style.display = 'block';
+            upButton.style.display = 'block';
+            downButton.style.display = 'block';
+            gameLoop();
+        }
+
+        function resetGame() {
+            gameState = 'playing';
+            cancelAnimationFrame(animationFrameId);
+            pauseButton.style.display = 'block';
+            resumeButton.style.display = 'none';
+            resetButton.style.display = 'block';
+            upButton.style.display = 'block';
+            downButton.style.display = 'block';
+            message.style.display = 'none';
+            obstacles = [];
+            scrollOffset = 0;
+            timer = 0;
+            goal.visible = false;
+            goal.x = 0;
+            goal.animationOffset = 0;
+            character.x = canvas.width - 100;
+            character.y = canvas.height / 2 - character.height / 2;
+
+            // リセット時にもゲームスタートメッセージを表示
+            startMessage.style.display = 'block';
+            startMessage.classList.remove('hidden');
+            setTimeout(() => {
+                startMessage.classList.add('hidden');
+                setTimeout(() => {
+                    startMessage.style.display = 'none';
+                }, 1000);
+            }, 2000);
+
+            gameLoop();
+        }
+
+        // ページ読み込み時にゲームスタート
+        window.addEventListener('load', startGame);
+
+        pauseButton.addEventListener('click', pauseGame);
+        resumeButton.addEventListener('click', resumeGame);
+        resetButton.addEventListener('click', resetGame);
+
+        upButton.addEventListener('click', () => {
+            if (gameState === 'playing') {
+                character.y -= character.speed * 10;
+                if (character.y < 0) character.y = 0;
+            }
+        });
+
+        downButton.addEventListener('click', () => {
+            if (gameState === 'playing') {
+                character.y += character.speed * 10;
+                if (character.y > canvas.height - character.height) character.y = canvas.height - character.height;
+            }
+        });
+    </script>
+</body>
+</html>
